@@ -1,0 +1,3 @@
+[submodule "ftr"]
+	path = ftr
+	url = https://github.com/avarankou/ftr.git
