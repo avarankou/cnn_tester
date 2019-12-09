@@ -142,7 +142,7 @@ namespace dt
             const std::string win_lbl("detection");
             const std::string recheck_win_lbl("RECHECK detection");
 
-            cv::Mat img = cv::imread(file.string());
+            cv::Mat img = cv::imread(file.string(), cv::IMREAD_COLOR);
             if (img.empty())
             {
                 logger::LOG_MSG(LL::Warning, "Failed to load image: " + file.string());

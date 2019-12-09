@@ -16,11 +16,12 @@ namespace ct
         path indir;
         path outdir;
         path misdir;
+        path thumbnails_dir;
         int save_misclassified;
         int indir_mode;
         int outdir_mode;
         bool outname_from_classification;
-        bool annotation;
+        int annotation;
         bool move_out;
 #       ifdef WITH_OPENCV_HIGHGUI
         bool dbg;
@@ -33,4 +34,6 @@ namespace ct
 
     /* thread func */
     void process_file(const path & file, std::mutex & dnn_mutex);
+    void label_img(const cv::Mat & img, cv::Mat & labeled, const clf::classifier_t::clf_res_t & result);
+    void label_img_with_thumbnails(const cv::Mat & img, cv::Mat & labeled, const clf::classifier_t::clf_res_t & result);
 }

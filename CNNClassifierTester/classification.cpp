@@ -169,7 +169,7 @@ namespace clf
         return gt_ok;
     }
 
-    std::string classifier_t::change_filename(const std::string & filename_short, const clf_array<std::string> & rec_names) const
+    std::string classifier_t::change_filename(const std::string & filename_short, const clf_array<out_pred_vec_t> & rec_names) const
     {
         if (params.filename_changer)
             return params.filename_changer(filename_short, rec_names);
@@ -181,16 +181,22 @@ namespace clf
 
         std::string new_filename;
         for (size_t class_id = 0; class_id < params.num_classes; ++class_id)
-            new_filename += rec_names[class_id] + '_';
+            //use top-1 recognition
+            new_filename += rec_names[class_id][0].first + '_';
 
-        while ((of = filename_short.find('_', of)) != std::string::npos)
+        if (filename_short.find('_') == std::string::npos)
+            new_filename += filename_short;
+        else
         {
-            if (++count == params.num_classes)
+            while ((of = filename_short.find('_', of)) != std::string::npos)
             {
-                new_filename += filename_short.substr(of + 1);
-                break;
+                if (++count == params.num_classes)
+                {
+                    new_filename += filename_short.substr(of + 1);
+                    break;
+                }
+                ++of;
             }
-            ++of;
         }
 
         return new_filename;
@@ -199,7 +205,9 @@ namespace clf
     void classifier_t::print_stat() const
     {
         for (size_t i = 0; i < params.num_classes; ++i)
+        {
             stat[i].print(params, outlayers_names[i], params.class_entries[i]);
+        }
     }
 
     void classifier_t::process_file(const path & file, const cv::Mat & img, clf_res_t & result)
@@ -238,23 +246,32 @@ namespace clf
 
             std::sort(pred.begin(), pred.end(), pair_desc);
 
-            if (pred[0].second >= stat[class_id].thresh)
+            for (size_t j = 0; j < stat[class_id].topk; ++j)
             {
-                int idx = (int)pred[0].first;
-                result.rec[class_id] = params.class_entries[class_id][idx];
-                if (params.check_filename)
+                int idx = (int)pred[j].first;
+                float rel = pred[j].second;
+
+                if (rel < stat[class_id].thresh)
+                    break;
+
+                result.rec[class_id].push_back(std::make_pair(params.class_entries[class_id][idx], rel));
+
+                if (j == 0)
                 {
-                    int gt_idx = gt_idxes[class_id];
-                    if (gt_idxes[class_id] > 0)
+                    if (params.check_filename)
                     {
-                        correct &= ((size_t)gt_idx == idx);
-                        stat[class_id].add((size_t)gt_idx, pred);
+                        int gt_idx = gt_idxes[class_id];
+                        if (gt_idxes[class_id] > 0)
+                        {
+                            correct &= ((size_t)gt_idx == idx);
+                            stat[class_id].add((size_t)gt_idx, pred);
+                        }
+                        else
+                            gt_idx = false;
                     }
                     else
-                        gt_idx = false;
+                        stat[class_id].add(idx, pred);
                 }
-                else
-                    stat[class_id].add(idx, pred);
             }
         }
 
@@ -293,42 +310,48 @@ namespace clf
     void classifier_t::stat_t::print(const param_t & params, const std::string & name, const std::vector<std::string> & class_entries) const
     {
         bool print_classnames = class_entries.size() == num_classes;
+        bool print_conf = (num_classes < 30);
 
-        std::stringstream msg;
-        msg << '\n' << name << (name.empty() ? "Predictions:\n" : " predictions:\n");
-
-        for (size_t class_id = 0; class_id < num_classes; ++class_id)
+        if (print_conf)
         {
-            if (print_classnames)
-                msg << std::setw(15) << class_entries[class_id];
-            for (size_t j = 0; j < num_classes; ++j)
-            {
-                size_t pred = conf.get(class_id, j);
-                pred ?
-                    (msg << std::setw(5) << pred << "(" << std::setw(3) << conf.getAccuracyPercent(class_id, j) << "%)") :
-                    (msg << std::setw(5) << pred) << std::setw(6) << ' ';
-            }
-            msg << '\n';
-        }
+            std::stringstream msg;
+            msg << '\n' << name << (name.empty() ? "Predictions:\n" : " predictions:\n");
 
-        if (topk > 1)
-        {
-            msg << '\n' << (name.empty() ? "TOP-": name + " TOP-") << topk << " predictions:\n";
             for (size_t class_id = 0; class_id < num_classes; ++class_id)
             {
                 if (print_classnames)
                     msg << std::setw(15) << class_entries[class_id];
                 for (size_t j = 0; j < num_classes; ++j)
                 {
-                    size_t pred = conf_topk.get(class_id, j);
+                    size_t pred = conf.get(class_id, j);
                     pred ?
                         (msg << std::setw(5) << pred << "(" << std::setw(3) << conf.getAccuracyPercent(class_id, j) << "%)") :
-                        (msg << std::setw(5) << pred << std::setw(6) << ' ');
+                        (msg << std::setw(5) << pred) << std::setw(6) << ' ';
                 }
                 msg << '\n';
             }
+
+            if (topk > 1)
+            {
+                msg << '\n' << (name.empty() ? "TOP-": name + " TOP-") << topk << " predictions:\n";
+                for (size_t class_id = 0; class_id < num_classes; ++class_id)
+                {
+                    if (print_classnames)
+                        msg << std::setw(15) << class_entries[class_id];
+                    for (size_t j = 0; j < num_classes; ++j)
+                    {
+                        size_t pred = conf_topk.get(class_id, j);
+                        pred ?
+                            (msg << std::setw(5) << pred << "(" << std::setw(3) << conf.getAccuracyPercent(class_id, j) << "%)") :
+                            (msg << std::setw(5) << pred << std::setw(6) << ' ');
+                    }
+                    msg << '\n';
+                }
+            }
+            logger::LOG_MSG(LL::Info, msg.str());
         }
 
+        std::stringstream msg;
         msg << '\n' << (name.empty() ? "Accuracy:\n" : name + " accuracy:\n");
         msg << conf.getCorrect() << '/' << conf.size();
         if (conf.size())
@@ -342,6 +365,5 @@ namespace clf
                 msg << '(' << std::setprecision(3) << 100. * conf_topk.getCorrect() / conf_topk.size() << "%)\n";
         }
 
-        logger::LOG_MSG(LL::Info, msg.str());
     }
 }

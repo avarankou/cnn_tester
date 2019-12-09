@@ -7,6 +7,7 @@
 #include <opencv2/imgproc.hpp>
 #ifdef WITH_OPENCV_HIGHGUI
 #include <opencv2/highgui.hpp>
+#include <iomanip>
 #endif // WITH_OPENCV_HIGHGUI
 
 namespace ct
@@ -50,7 +51,9 @@ namespace ct
         }
         params.outdir = (path)cmd.get<std::string>("outdir");
         params.outname_from_classification = cmd.get<int>("out_filename") == 0 ? true : false;
-        params.annotation = cmd.get<int>("annotation") == 0 ? false : true;
+        params.annotation = cmd.get<int>("annotation");
+        if (params.annotation == 2)
+            params.thumbnails_dir = (path)cmd.get<std::string>("thumbnails_dir");
         params.move_out= cmd.get<int>("move_out") == 0 ? false : true;
 
 
@@ -121,8 +124,6 @@ namespace ct
     {
         try
         {
-            const cv::Scalar COLOR_RED(0, 0, 255);
-            const cv::Scalar COLOR_GREEN(0, 255, 0);
             const int SPACE_KEY = 32;
             const int ENTER_KEY = 13;
             const std::string win_label("classification");
@@ -131,7 +132,8 @@ namespace ct
             bool new_outname = params.outname_from_classification;
             bool mis = false;
 
-            cv::Mat img = cv::imread(file.string());
+            cv::Mat img = cv::imread(file.string(), cv::IMREAD_COLOR);
+            cv::Mat dbg_img;
             if (img.empty())
             {
                 logger::LOG_MSG(LL::Warning, "Failed to load image: " + file.string());
@@ -144,28 +146,14 @@ namespace ct
                 classifier.process_file(file, img, result);
             }
 
-            cv::Mat dbg_img;
             if (params.recheck_misclassified || params.dbg || params.annotation)
             {
-                img.copyTo(dbg_img);
-
-                std::stringstream gt;
-                std::stringstream rec;
-                for (size_t i = 0; i < classifier.params.num_classes; ++i)
-                {
-                    gt << result.gt[i] << ' ';
-                    rec << result.rec[i] << ' ';
-                }
-                if (classifier.params.check_filename)
-                {
-                    cv::putText(dbg_img, gt.str(), cv::Point(10, 10), 1, 1, COLOR_GREEN);
-                    if (!result.correct)
-                        cv::putText(dbg_img, rec.str(), cv::Point(10, 30), 1, 1, COLOR_RED);
-                }
+                if (params.annotation <= 1)
+                    label_img(img, dbg_img, result);
                 else
-                    cv::putText(dbg_img, rec.str(), cv::Point(10, 30), 1, 1, COLOR_RED);
-
+                    label_img_with_thumbnails(img, dbg_img, result);
             }
+
 #           ifdef WITH_OPENCV_HIGHGUI
             if (params.recheck_misclassified &&
                 !result.correct)
@@ -233,6 +221,130 @@ namespace ct
         catch (...)
         {
             logger::LOG_MSG(LL::Error, "Unknown exception.");
+        }
+    }
+
+    void label_img(const cv::Mat & img, cv::Mat & labeled, const clf::classifier_t::clf_res_t & result)
+    {
+        const cv::Scalar COLOR_RED(0, 0, 255);
+        const cv::Scalar COLOR_GREEN(0, 255, 0);
+        const cv::Scalar COLOR_BLUE(255, 0);
+
+        labeled = img;
+
+        if (result.rec.empty())
+            return;
+
+        int label_rows = (classifier.params.check_filename ? 1 : 0);
+        size_t max_pred_topk = 0;
+        std::stringstream gt;
+        for (size_t i = 0; i < classifier.params.num_classes; ++i)
+        {
+            max_pred_topk = std::max(max_pred_topk, result.rec[i].size());
+            if (result.gt.size() <= i)
+                continue;
+            gt << result.gt[i] << ' ';
+        }
+        label_rows += (int)max_pred_topk;
+
+        if (label_rows == 0)
+           return;
+
+        int row_height = 20;
+        int print_pos = img.rows + row_height / 2;
+
+        cv::Scalar text_bg = cv::Scalar(255, 255, 255);
+        labeled = cv::Mat(img.rows + label_rows * row_height, img.cols, CV_8UC3, text_bg);
+        img.copyTo(cv::Mat(labeled, cv::Rect(0, 0, img.cols, img.rows)));
+
+        if (classifier.params.check_filename)
+        {
+            cv::putText(labeled, gt.str(), cv::Point(10, print_pos), 1, 1.5, COLOR_BLUE);
+            print_pos += row_height;
+        }
+
+        for (size_t i = 0; i < max_pred_topk; ++i, print_pos += row_height)
+        {
+            std::stringstream rec;
+            for (size_t j = 0; j < classifier.params.num_classes; ++j)
+            {
+                if (result.rec[j].size() <= i)
+                    continue;
+                std::string class_name = result.rec[j][i].first;
+                float rel = result.rec[j][i].second;
+                rec << class_name << ' ' << std::setprecision(2) << rel;
+            }
+
+            if (i == 0 && result.correct)
+                cv::putText(labeled, rec.str(), cv::Point(10, print_pos), 1, 1., COLOR_GREEN);
+            else
+                cv::putText(labeled, rec.str(), cv::Point(10, print_pos), 1, 1., COLOR_RED);
+        }
+    }
+
+    void label_img_with_thumbnails(const cv::Mat & img, cv::Mat & labeled, const clf::classifier_t::clf_res_t & result)
+    {
+        const cv::Scalar COLOR_RED(0, 0, 255);
+        const cv::Scalar COLOR_GREEN(0, 255, 0);
+        const cv::Scalar COLOR_BLUE(255, 0);
+
+        labeled = img;
+
+        // only for single-label classification
+        if (result.rec.empty() || result.rec[0].empty())
+            return;
+
+        int label_rows = (classifier.params.check_filename ? 1 : 0);
+        size_t pred_topk = result.rec[0].size();
+        label_rows += (int)pred_topk;
+
+        if (label_rows == 0)
+            return;
+
+        int thumb_height = 128;
+        int thumb_width = 128;
+
+        cv::Mat img_rs = img;
+        if (img.cols < thumb_width)
+        {
+            double sf = 1. * thumb_width / img.cols;
+            cv::resize(img, img_rs, cv::Size(), sf, sf);
+        }
+
+        int print_pos = img_rs.rows + thumb_height / 2;
+        cv::Scalar text_bg = cv::Scalar(255, 255, 255);
+        int labeled_height = img_rs.rows + label_rows * thumb_height;
+        int labeled_width = (img_rs.cols + thumb_width);
+        labeled = cv::Mat(labeled_height, labeled_width, CV_8UC3, text_bg);
+        img_rs.copyTo(cv::Mat(labeled, cv::Rect(thumb_width, 0, img_rs.cols, img_rs.rows)));
+
+        if (classifier.params.check_filename && !result.gt.empty())
+        {
+            cv::putText(labeled, result.gt[0], cv::Point(thumb_width + 10, print_pos), 1, 1.5, COLOR_BLUE);
+            print_pos += thumb_height;
+        }
+
+        for (size_t i = 0; i < pred_topk; ++i, print_pos += thumb_height)
+        {
+            std::stringstream rec;
+            if (result.rec[0].size() <= i)
+                break;
+            std::string class_name = result.rec[0][i].first;
+            float rel = result.rec[0][i].second;
+            rec << class_name << ' ' << std::setprecision(2) << rel;
+
+            cv::Mat thumbnail = cv::imread((params.thumbnails_dir / (class_name + ".jpg")).string(), cv::IMREAD_COLOR);
+            if (!thumbnail.empty())
+            {
+                cv::resize(thumbnail, thumbnail, cv::Size(thumb_width, thumb_height));
+                cv::Mat roi(labeled, cv::Rect(0, print_pos - (thumb_height / 2), thumb_width, thumb_height));
+                thumbnail.copyTo(roi);
+            }
+
+            if (i == 0 && result.correct)
+                cv::putText(labeled, rec.str(), cv::Point(thumb_width + 10, print_pos), 1, 1., COLOR_GREEN);
+            else
+                cv::putText(labeled, rec.str(), cv::Point(thumb_width + 10, print_pos), 1, 1., COLOR_RED);
         }
     }
 }

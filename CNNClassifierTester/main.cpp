@@ -26,7 +26,8 @@ int main(int argc, char ** argv)
         "{outdir_mode|0|-1 - disable output, 0 - common root folder, 1 - separate folders}"
         "{out_filename|0|0 - with filename from classified labels, 1 - with original filename}"
         "{move_out|0|move images to output directory (copy by default)}"
-        "{annotation|0|classification annotation of output images}"
+        "{annotation|0|classification annotation of output images, 1 - text annotation, 2 - thumbnail annotation (single-class classification only)}"
+        "{thumbnails_dir||path to thumbnails for annotation (if annotation=2), filenames in format <class_1>.jpg}"
         "{save_misclassified mis|0|save misclassified images (only if filename_as_labels = 1): 0 - with filename from classified labels, 1 - with original filename, -1 - don't save misclasified}"
         "{misclassified_dir misdir||path to output dir for misclassified images}"
 #       ifdef WITH_OPENCV_HIGHGUI

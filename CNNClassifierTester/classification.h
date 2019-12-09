@@ -10,7 +10,9 @@
 namespace clf
 {
     using pred_t = std::pair<size_t, float>;
+    using out_pred_t = std::pair<std::string, float>;
     using pred_vec_t = std::vector<pred_t>;
+    using out_pred_vec_t = std::vector<out_pred_t>;
     using path = std::experimental::filesystem::v1::path;
 
     struct classifier_t
@@ -29,7 +31,7 @@ namespace clf
         template <typename T> using clf_array = std::array<T, CLASSES::SIZE>;
 
         using parse_filename_func_t = bool(*)(const std::string & filename_short, clf_array<int> & gt_idx, clf_array<std::string> & gt_names);
-        using change_filename_func_t = std::string(*)(const std::string & filename_short, const clf_array<std::string> & rec_names);
+        using change_filename_func_t = std::string(*)(const std::string & filename_short, const clf_array<out_pred_vec_t> & rec_names);
 
         struct param_t
         {
@@ -74,7 +76,7 @@ namespace clf
         struct clf_res_t
         {
             clf_array<std::string> gt;
-            clf_array<std::string> rec;
+            clf_array<out_pred_vec_t> rec;
 
             bool correct = false;
         };
@@ -83,7 +85,7 @@ namespace clf
         bool load_class_entries(const path & filename, const CLASSES id);
         bool load_classifier();
         bool parse_filename(const std::string & filename_short, clf_array<int> & gt_idx, clf_array<std::string> & gt_names) const;
-        std::string change_filename(const std::string & filename_short, const clf_array<std::string> & rec_names) const;
+        std::string change_filename(const std::string & filename_short, const clf_array<out_pred_vec_t> & rec_names) const;
 
         void print_stat() const;
         void process_file(const path & file, const cv::Mat & img, clf_res_t & result);
